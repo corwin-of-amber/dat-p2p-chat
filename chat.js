@@ -5,14 +5,13 @@ const {FeedClient} = require('./src/client'),
 
 function main_chat() {
     var c1 = new FeedClient();
-    var c2 = new FeedClient();
 
     App.start().attach(c1);
 
     window.addEventListener('beforeunload', () => {
-        c1.close(); c2.close();
+        c1.close();
     });
-    Object.assign(window, {c1, c2});
+    Object.assign(window, {c1});  // for debugging
 }
 
 
@@ -23,5 +22,8 @@ if (typeof process !== 'undefined' && process.versions.nw)
 if (typeof window !== 'undefined') {
     Object.assign(window, {main_chat});
 }
-else
+else {
+    var c1 = new FeedClient();
     c1.join('lobby', false); // listen only
+    c1.on('append', ev => console.log(ev.data));
+}
