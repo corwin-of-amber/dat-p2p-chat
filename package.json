@@ -15,5 +15,8 @@
     "vue": "^2.6.10",
     "webrtc-swarm": "github:corwin-of-amber/webrtc-swarm",
     "wrtc": "^0.4.1"
+  },
+  "scripts": {
+    "build": "rm -rf @geut/discovery-swarm-webrtc/node_modules/webrtc-swarm && browserify chat.js > chat.bundle.js"
   }
 }
