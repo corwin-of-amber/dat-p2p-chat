@@ -1,0 +1,19 @@
+{
+  "name": "dat-p2p-chat",
+  "version": "1.0.0",
+  "description": "A simple chat room using Dat components",
+  "main": "index.html",
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@geut/discovery-swarm-webrtc": "^1.2.0",
+    "hypercore": "^7.5.1",
+    "moment": "^2.24.0",
+    "random-access-memory": "^3.1.1",
+    "signalhubws": "^1.0.10",
+    "sub-signalhub": "^1.0.1",
+    "vue": "^2.6.10",
+    "webrtc-swarm": "github:corwin-of-amber/webrtc-swarm",
+    "wrtc": "^0.4.1"
+  }
+}
