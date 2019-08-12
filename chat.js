@@ -1,5 +1,5 @@
-const {FeedClient} = require('./src/client'),
-      {App} = require('./src/ui');
+const {FeedClient} = require('./src/net/client'),
+      {App} = require('./src/ui/ui');
 
 
 

@@ -1,6 +1,6 @@
 const Vue = require('vue/dist/vue'),
       moment = require('moment'),
-      bidiText = typeof detectTextDir !== 'undefined' ? {detectTextDir} : require('./ui/bidi-text');
+      bidiText = typeof detectTextDir !== 'undefined' ? {detectTextDir} : require('./bidi-text');
 
 
 
