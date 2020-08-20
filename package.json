@@ -2,7 +2,7 @@
   "name": "dat-p2p-chat",
   "version": "1.0.0",
   "description": "A simple chat room using Dat components",
-  "main": "index.html",
+  "main": "build/kremlin/index.html",
   "author": "",
   "license": "MIT",
   "dependencies": {

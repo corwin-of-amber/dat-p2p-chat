@@ -4,14 +4,15 @@ const {FeedClient} = require('./src/net/client'),
 
 
 function main_chat() {
-    var c1 = new FeedClient();
+    var c1 = new FeedClient(),
+        c2 = new FeedClient();
 
     App.start().attach(c1);
 
     window.addEventListener('beforeunload', () => {
         c1.close();
     });
-    Object.assign(window, {c1});  // for debugging
+    Object.assign(window, {c1, c2});  // for debugging
 }
 
 
@@ -20,7 +21,8 @@ if (typeof process !== 'undefined' && process.versions.nw)
     global.console = window.console;  // for debugging in nwjs
 
 if (typeof window !== 'undefined') {
-    Object.assign(window, {main_chat});
+    const {Buffer} = require('buffer');  // for Kremlin
+    Object.assign(window, {main_chat, Buffer});
 }
 else {
     var c1 = new FeedClient();
