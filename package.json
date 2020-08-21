@@ -6,9 +6,10 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@geut/discovery-swarm-webrtc": "^1.2.0",
     "hypercore": "^7.5.1",
+    "merge-options": "^2.0.0",
     "moment": "^2.24.0",
+    "pump": "^3.0.0",
     "random-access-memory": "^3.1.1",
     "signalhubws": "^1.0.10",
     "sub-signalhub": "^1.0.1",
@@ -17,6 +18,6 @@
     "wrtc": "^0.4.1"
   },
   "scripts": {
-    "build": "rm -rf @geut/discovery-swarm-webrtc/node_modules/webrtc-swarm && browserify chat.js > chat.bundle.js"
+    "build": "kremlin index.html"
   }
 }

@@ -26,13 +26,13 @@ Vue.component('p2p.source-peers', {
     },
     methods: {
         updatePeers(client) {
-            this.peers.splice(0, Infinity, ...client.peers.keys());
+            this.peers.splice(0, Infinity, ...client.getPeers().map(p => p.id));
         },
         register(client) {
             client.deferred.init.then(() => {
                 var cb = () => this.updatePeers(client);
-                client.on('peer-connect', cb);
-                client.on('peer-disconnect', cb);
+                client.on('peer:join', cb);
+                client.on('peer:leave', cb);
                 cb();
                 this._registered = {client, cb};
             })
@@ -40,8 +40,8 @@ Vue.component('p2p.source-peers', {
         unregister() {
             if (this._registered) {
                 var {client, cb} = this._registered;
-                client.removeListener('peer-connect', cb);
-                client.removeListener('peer-disconnect', cb);
+                client.removeListener('peer:join', cb);
+                client.removeListener('peer:leave', cb);
             }
         }
     }
@@ -51,7 +51,9 @@ Vue.component('p2p.list-of-peers', {
     template: `
         <div>
             <p2p.source-peers ref="source"/>
-            <plain-list ref="list"/>
+            <plain-list ref="list" v-slot="{item}">
+                {{item.toString('hex')}}
+            </plain-list>
         </div>
     `,
     mounted() {
@@ -77,13 +79,13 @@ Vue.component('p2p.source-messages', {
     methods: {
         register(client) {
             var cb = ev => { this.messages.push(ev.data); };
-            client.on('append', cb);
+            client.on('feed:append', cb);
             this._registered = {client, cb};
         },
         unregister() {
             if (this._registered) {
                 var {client, cb} = this._registered;
-                client.removeListener('append', cb);
+                client.removeListener('feed:append', cb);
             }
         }
     }
@@ -146,7 +148,7 @@ Vue.component('p2p.button-join', {
                 (this.pending ? "connecting" : "disconnected");
         },
         joined() {
-            return this.clientChannels && !!this.clientChannels.has(this._channel);
+            return this.clientChannels && this.clientChannels.includes(this._channel);
         },
         disabled() { return !this._client || this.status != 'disconnected'; },
         _channel() { return this.channel || 'lobby'; },
@@ -161,11 +163,7 @@ Vue.component('p2p.button-join', {
     methods: {
         async register(client) {
             await client.deferred.init;
-            var update = () => this.clientChannels =
-                new Set(client.swarm.channels);
-            update();
-            client.swarm.webrtc.on('connection', update);
-            client.swarm.webrtc.on('close', update);
+            this.clientChannels = client.activeChannels.l;
         },
         unregister() {
             this.clientChannels = null;

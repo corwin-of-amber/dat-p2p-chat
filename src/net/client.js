@@ -1,13 +1,18 @@
-const signalhubws = require('signalhubws');
+import assert from 'assert';
+import { EventEmitter } from 'events';
+import randomBytes from 'randombytes';
+import pump from 'pump';
+import mergeOptions from 'merge-options';
 
-const swarm = require('./discovery-swarm-web-thin');
+import WebRTCSwarm from 'webrtc-swarm';
+import signalhubws from 'signalhubws';
+import subsignalhub from 'sub-signalhub';
+import ram from 'random-access-memory';
 
-const ram = require('random-access-memory');
-
-const {EventEmitter} = require('events');
-
-const deferred = require('../core/deferred'),
-      {FeedCrowd} = require('./crowd');
+import deferred from '../core/deferred';
+import { HexKeyedMap, hex } from '../core/id-keys';
+import { ObservableSet, fwd } from '../core/reactive';
+import { FeedCrowd } from './crowd';
 
 
 
@@ -17,9 +22,11 @@ const node_require = require, /* bypass browserify */
       wrtc = (typeof RTCPeerConnection === 'undefined') ? node_require('wrtc') : undefined;
 
 
-const DEFAULT_APP_NAME = 'hyper-chat-example',
-      DEFAULT_SERVERS = {hub: 'wss://amberhubws.herokuapp.com'};
-      //DEFAULT_SERVERS = {hub: 'ws://localhost:3300'};
+const DEFAULT_OPTIONS = {
+        appName: 'dat-p2p-crowd',
+        servers: {hub: 'wss://amberhubws.herokuapp.com'}
+        //servers: {hub: 'ws://localhost:3300'}
+    };
 
 
 
@@ -27,12 +34,14 @@ class SwarmClient extends EventEmitter {
 
     constructor(opts) {
         super();
-        this.opts = opts;
-        this.opts.servers = this.opts.servers || DEFAULT_SERVERS;
-        this.opts.appName = this.opts.appName || DEFAULT_APP_NAME;
+        this.opts = mergeOptions(DEFAULT_OPTIONS, opts);
+        this.id = this.opts.id || randomBytes(32);
         this.deferred = {init: deferred()};
 
-        this.channels = new Set();
+        this.channels = new Map();
+        this.activeChannels = new ObservableSet();
+
+        this.opened = false;
     }
 
     init() {
@@ -43,52 +52,47 @@ class SwarmClient extends EventEmitter {
     _init() {
         return new Promise((resolve, reject) => {
             this.hub =
-                signalhubws(DEFAULT_APP_NAME, [this.opts.servers.hub], node_ws);
+                signalhubws(this.opts.appName, [this.opts.servers.hub], node_ws);
 
-            var id = this.swarm ? this.swarm.id : undefined;
-
-            this.swarm = swarm({signalhub: this.hub, id, wrtc,
-                stream: this.opts.stream
-            });
-            
             this.hub.once('open', () => {
-                this._registerReconnect();
+                this.opened = true;
+                this._registerCloseEvents();
                 resolve(); this.emit('init');
             });
 
-            this.swarm.webrtc.on('connection', (peer, info) =>
-                this.emit('peer-connect', peer, info));
-            this.swarm.webrtc.on('connection-closed', (peer, info) =>
-                this.emit('peer-disconnect', peer, info));
-
-            this.id = this.swarm.id.toString('hex');
-            console.log(`me: %c${this.id}`, 'color: green;');
+            console.log(`me: %c${this.id.toString('hex')}`, 'color: green;');
+            this._registerReconnect();
         });
     }
 
     async join(channel) {
-        this.channels.add(channel);
+        var s = new SwarmClient.Channel(this, channel);
+        fwd(s, ['peer:join', 'peer:ready', 'peer:leave'], this);
+        this.channels.set(channel, s);
 
         await this.init();
-        this.swarm.join(channel, {wrtc});
+        if (!s.swarm) s.join();  // in case client was not ready before
+        this.activeChannels.add(channel);
     }
 
     close() {
         this._unregisterReconnect();
         if (this.hub) this.hub.close();
-        if (this.swarm) {
-            if (this.swarm.webrtc) this.swarm.webrtc.close(); // bug in discovery-swarm-web
-            this.swarm.close();
+        for (let chan of this.channels.values()) {
+            chan.leave();
         }
+        this.activeChannels.clear();
+        this.opened = false;
         this._initPromise = null;
     }
 
     async reconnect() {
-        console.log("%c- reconnect -", 'color: red;')
+        var timestamp = new Date().toLocaleTimeString();
+        console.log(`%c- reconnect - %c${timestamp}`, 'color: red;', 'color: #ccc');
         this.close();
         
         await this.init();
-        for (let chan of this.channels) this.join(chan)
+        for (let chan of this.channels.values()) chan.join();
     }
 
     /**
@@ -98,55 +102,105 @@ class SwarmClient extends EventEmitter {
      */
     getPeer(id, channel=undefined) {
         if (id.id) id = id.id;
-        if (typeof id !== 'string') id = id.toString('hex');
 
-        var channelMap = this.swarm.webrtc.channels,
-            channels = channel ? [channelMap.get(channel)].filter(x => x)
-                               : channelMap.values()
+        var channels = channel ? [this.channels.get(channel)].filter(x => x)
+                               : this.channels.values()
 
         for (let chan of channels) {
-            var p = chan.swarm.remotes[id];
-            if (p) return p;
+            var p = chan.peers.get(id);
+            if (p) return {id, ...p};
         }
     }
 
     getPeers(channel=undefined) {
-        var peers = [];
+        var channels = channel ? [this.channels.get(channel)].filter(x => x)
+                               : [...this.channels.values()]
 
-        var channelMap = this.swarm.webrtc.channels,
-            channels = channel ? [channelMap.get(channel)].filter(x => x)
-                               : channelMap.values()
+        return [].concat(...
+            channels.map(chan => [...chan.peers.entries()]
+                .map(([id, p]) => ({id, ...p}))));
+    }
 
-        for (let chan of channels) {
-            peers.push(...Object.values(chan.swarm.remotes));
-        }
-
-        return peers;
+    _registerCloseEvents() {
+        for (let s of this.hub.sockets) s.onclose = () => this.emit('disconnect');
     }
 
     _registerReconnect() {
-        for (let s of this.hub.sockets) s.onclose = () => this.reconnect();
+        if (!this._reconnectHandler) {
+            this._reconnectHandler = () => this.reconnect();
+            this.on('disconnect', this._reconnectHandler);
+        }
     }
 
     _unregisterReconnect() {
-        if (this.hub) {
-            for (let s of this.hub.sockets) s.onclose = null
+        if (this._reconnectHandler) {
+            this.removeListener('disconnect', this._reconnectHandler);
+            this._reconnectHandler = null;
         }
     }
 }
 
+/**
+ * Represents a connection to a channel in a Signalhub.
+ * (using subsignalhub.)
+ */
+SwarmClient.Channel = class extends EventEmitter {
+
+    constructor(client, name, opts={}) {
+        super();
+        this.client = client;
+        this.name = name;
+        this.opts = opts;
+
+        this.peers = new HexKeyedMap();
+        if (this.client.hub) this.join();
+    }
+
+    join() {
+        var hub = this.client.hub, uuid = hex(this.client.id);
+        this.hub = this.name ? subsignalhub(hub, `:${this.name}:`) : hub;
+
+        this.swarm = WebRTCSwarm(this.hub, {wrtc, uuid, ...this.opts});
+        this.swarm.on('peer', (peer, id) => {
+            this.peers.set(id,
+                {peer, wire: this._handle(peer, id)});
+            this.emit('peer:join', {id, peer});
+        });
+        this.swarm.on('disconnect', (peer, id) => {
+            this.peers.delete(id);
+            this.emit('peer:leave', {id, peer});
+        });
+    }
+
+    leave() {
+        if (this.swarm)
+            this.swarm.close();
+        this.swarm = undefined;
+    }
+
+    _handle(peer, id) {
+        if (this.client.opts.stream) {
+            const wire = this.client.opts.stream({id, channel: this,
+                                                  initiator: peer.initiator});
+            wire.on('handshake', () => this.emit('peer:ready', {id, peer}));
+            pump(peer, wire, peer)
+            return wire;
+        }
+    }        
+}
 
 
 class FeedClient extends SwarmClient {
 
-    constructor() {
-        super({
+    constructor(opts) {
+        super(mergeOptions({
             stream: info => this._stream(info)
-        });
+        }, opts));
 
-        this.peers = new Map();
+        this.peers = new HexKeyedMap();
 
-        this.crowd = new FeedCrowd({storage: ram, feed: {valueEncoding: 'json'}});
+        this.crowd = new FeedCrowd({storage: ram, feed: {valueEncoding: 'json'}, 
+                                    extensions: ['shout']});
 
         this.crowd.on('feed:append', feed => this.onAppend(feed));
         this.crowd.on('feed:error', (feed, e) => this.onError(feed, e));
@@ -158,7 +212,7 @@ class FeedClient extends SwarmClient {
     _stream(info) {
         console.log('stream', info);
         try {
-            var wire = this.crowd.replicate({id: info.id, timeout: false});
+            var wire = this.crowd.replicate({id: info.id});
             this.peers.set(info.id, wire);
             return wire.chunked();
         }
@@ -179,12 +233,6 @@ class FeedClient extends SwarmClient {
         this.peers.delete(id);
     }
 
-    join(channel, withFeed=true) {
-        if (withFeed && !this.feed) this.create();
-
-        return super.join(channel);
-    }
-
     get key() {
         return this.crowd.longKey(this.feed);
     }
@@ -200,7 +248,7 @@ class FeedClient extends SwarmClient {
         for (let i = from; i < to; i++) {
             await this._feedGet(feed, i).then(item => {
                 //console.log(this.crowd.shortKey(feed), i, item);
-                this.emit('append', {me: this.key, from: this.crowd.longKey(feed), feed, 
+                this.emit('feed:append', {me: this.key, from: this.crowd.longKey(feed), feed, 
                     index: i, data: item})
             })
             .catch(e => this.onError(feed, e));
