@@ -34,8 +34,8 @@ class FeedCrowd extends EventEmitter {
 
     get feeds() { return this.localFeeds.concat(this.remoteFeeds); }
 
-    replicate(opts) {
-        var wire = new Wire(this.opts.key, opts)
+    replicate(initiator, opts) {
+        var wire = new Wire(initiator, this.opts.key, opts)
             .on('handshake', () => this._populate(wire))
             .on('control', info => this._control(wire, info))
             .on('error', e => this.emit('error', e, wire))
@@ -162,10 +162,9 @@ class Wire extends Protocol {
      * @param {Buffer} key encryption key
      * @param {object} opts options passed to Protocol
      */
-    constructor(key, opts) {
-        super(opts);
-        this.metastream = this.feed(key);
-        this.metastream.on('data', (msg) => this._onData(msg));
+    constructor(initiator, key, opts) {
+        super(initiator, opts);
+        this.metastream = this.open(key, {ondata: msg => this._onData(msg)});
         this._index = 0;
         this._shared = new WeakSet();  // feeds that have been shared
     }
@@ -176,13 +175,14 @@ class Wire extends Protocol {
     }
 
     _onData(msg) {
+        console.log(msg);
         this.emit('control', JSON.parse(msg.value));
     }
 
     share(feed) {
         if (!this._shared.has(feed)) {
             this._shared.add(feed);
-            feed.replicate({stream: this, live: true});
+            feed.replicate(this, {live: true});
         }
     }
 

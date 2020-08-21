@@ -5,8 +5,13 @@
   "main": "build/kremlin/index.html",
   "author": "",
   "license": "MIT",
+  "browser": {
+    "mass-confusion": true,
+    "sodium-native": "./node_modules/sodium-universal"
+  },
   "dependencies": {
-    "hypercore": "^7.5.1",
+    "duplexify": "^4.1.1",
+    "hypercore": "^9.5.0",
     "merge-options": "^2.0.0",
     "moment": "^2.24.0",
     "pump": "^3.0.0",
